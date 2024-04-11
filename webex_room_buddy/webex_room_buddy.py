@@ -2,13 +2,7 @@ import os
 import urllib3
 import requests
 import streamlit as st
-from langchain_community.llms import Ollama
-from langchain_community.vectorstores import Chroma
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
-from langchain_community.document_loaders import TextLoader
-from langchain_experimental.text_splitter import SemanticChunker
-from langchain_community.embeddings import HuggingFaceInstructEmbeddings 
+import time
 
 urllib3.disable_warnings()
 
@@ -28,25 +22,46 @@ class ChatWithWebexRoom:
         self.setup_conversation_memory()
         self.setup_conversation_retrieval_chain()
 
-    def fetch_and_setup_conversation(self, key, room):
-        with st.spinner("Gathering Webex Room Messages ...."):
-            url = f"https://webexapis.com/v1/messages?roomId={room}&max=500"
-            headers = {'Authorization': f'Bearer {key}'}
-            response = requests.get(url, headers=headers, verify=False)
-            if response.status_code == 200:
-                st.write("Webex status code", response.status_code)
-                json_messages = response.json()
-                st.write("Raw JSON", json_messages)
-                conversation = ""
-                for message in json_messages['items']:
-                    if 'text' in message:
-                        person = message['personEmail'].split("@")[0]  # Simplified email handling
-                        timestamp = message['created']
-                        conversation += f"{timestamp} {person}: {message['text']}\n"
-                self.save_conversation_to_file(conversation, 'conversation.txt')
+def fetch_and_setup_conversation(self, key, room, fetch_all=False):
+    url = f"https://webexapis.com/v1/messages?roomId={room}&max=500"
+    headers = {'Authorization': f'Bearer {key}'}
+    conversation = ""
+
+    while url:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            print("Webex status code:", response.status_code)
+            json_messages = response.json()
+            print("Raw JSON:", json_messages)
+            
+            for message in json_messages['items']:
+                if 'text' in message:
+                    person = message['personEmail'].split("@")[0]  # Simplified email handling
+                    timestamp = message['created']
+                    conversation += f"{timestamp} {person}: {message['text']}\n"
+            
+            if not fetch_all:
+                break
+            
+            # Check for pagination
+            if 'Link' in response.headers:
+                links = response.headers['Link'].split(', ')
+                for link in links:
+                    if 'rel="next"' in link:
+                        url = link.split(';')[0][1:-1]
+                        break
+                else:
+                    url = None
             else:
-                st.error("Failed to fetch messages from Webex.")
-                self.pages = []
+                url = None
+
+            # Sleep to avoid hitting rate limits
+            time.sleep(1)
+        else:
+            print("Failed to fetch messages from Webex. Error:", response.text)  # Print error message
+            return
+
+    save_conversation_to_file(conversation, 'conversation.txt')
         
     def save_conversation_to_file(self, conversation, file_name):
         with open(file_name, 'w') as file:
